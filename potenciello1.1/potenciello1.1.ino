@@ -1,15 +1,20 @@
 /////////////////////////////////
 // POTENCIELLO 1.1
-// Created: April 4, 2017
+// Created: December 8, 2014
+// Updated: April 4, 2017
 // Creator: Pong Trairatvorakul
 /////////////////////////////////
+
+//== IMPORT RELEVANT LIBRARIES ===========================
 
 #include <Audio.h>
 #include <Wire.h>
 #include <SPI.h>
 #include <SD.h>
+#include <LiquidCrystal.h>
+#include <Encoder.h>
 
-// GUItool: begin automatically generated code
+//== Generate Synthesis Modules & Connections ============
 AudioSynthWaveformDc     ampEnv;            //xy=182,301
 AudioSynthWaveformDc     ampEnv2;            //xy=182,301
 AudioSynthWaveformDc     ampEnv0;            //xy=182,301
@@ -54,45 +59,38 @@ AudioConnection          patchCord16(filter0, 0, filter3, 0);
 AudioConnection          patchCord17(filtEnv3, 0, filter3, 1);
 AudioConnection          patchCord18(filter3, 2, dac1, 0);
 
-//
-//AudioConnection          patchCord19(filter3, 0, filter4, 0);
-//AudioConnection          patchCord21(filtEnv4, 0, filter4, 1);
-//AudioConnection          patchCord20(filter4,0, dac1,0);
 
-
-//SMOOTH
-#define BUFFSIZE 10
-int motrBuff[BUFFSIZE];
-int acclBuff[BUFFSIZE];
-int motrSum = 0;
-int acclSum = 0;
+//== Declare Globals ==========================================
+// for smoothing
+#define BUFFSIZE 10       // size of buffer to take average of
+int motrBuff[BUFFSIZE];   // buffer for motor
+int acclBuff[BUFFSIZE];   // buffer for accelerometer
+int motrSum = 0;          // sum of motor inputs
+int acclSum = 0;          // sum of accelerometer inputs
 
 int i, j;              // loop counters or demo
 
-// GUItool: end automatically generated code
-
-#include <LiquidCrystal.h>
-#include <Encoder.h>
-
+// for use in scale
 volatile boolean fromScale;
 volatile int lastScaleEncoder;
 volatile boolean firstTimeInScale = true;
 
-volatile int base = 57;
-volatile boolean fromOpenString;
-volatile int lastStringEncoder;
+// for notes
+volatile int base = 57;          // lowest note
+volatile boolean fromOpenString; // true if last mode was open string
+volatile int lastStringEncoder;  // value from rotary encoder
 volatile boolean firstTimeOpenString = true;
 
-volatile float refPitch = 440.;
-volatile boolean firstTimeFinetune = true;
-volatile int lastFinetuneEncoder;
-volatile boolean fromFinetune;
+volatile float refPitch = 440.;  // reference 'A' pitch
+volatile boolean firstTimeFinetune = true; // true if first time in finetuning
+volatile int lastFinetuneEncoder; // store last finetune value
+volatile boolean fromFinetune;    // flag for leaving finetuning mode
 
-volatile boolean firstTimeWaveform = true;
-volatile boolean fromWaveform;
-volatile int lastWaveformEncoder;
+volatile boolean firstTimeWaveform = true; // choose waveform mode
+volatile boolean fromWaveform;             // flag for leave waveform mode
+volatile int lastWaveformEncoder;          // store last waveform
 
-//PARAMETERS
+// parameters in the scroll menu
 String parameters[] = {
   "OPEN STRING     ",
   "SCALE           ",
@@ -101,13 +99,14 @@ String parameters[] = {
 };
 
 
-//SCALES
+// different scales
 int musicalScale[4][16] = {
   {base, base + 2, base + 4, base + 5, base + 7, base + 9, base + 11, base + 12, base + 14, base + 16, base + 17, base + 19, base + 21, base + 23, base + 24},
   {base, base + 2, base + 3, base + 5, base + 7, base + 8, base + 11, base + 12, base + 14, base + 15, base + 17, base + 19, base + 20, base + 23, base + 24},
   {base, base + 2, base + 3, base + 5, base + 7, base + 9, base + 11, base + 12, base + 14, base + 15, base + 17, base + 19, base + 21, base + 23, base + 24},
   {base, base + 2, base + 3, base + 5, base + 7, base + 8, base + 10, base + 12, base + 14, base + 15, base + 17, base + 19, base + 20, base + 22, base + 24},
 };
+// .. and their respective names
 String scaleName[] = {
   "Major           ",
   "Harmonic min    ",
@@ -117,6 +116,7 @@ String scaleName[] = {
 };
 int scaleIndex = (sizeof(musicalScale) / sizeof(int) / 16);
 
+// octave multipliers
 float octave[] = {0.5, 1., 2.};
 
 float touch_maximum = 0;
@@ -128,28 +128,23 @@ LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 //Lower Encoder Initialize
 int encoderPin1 = 6;
 int encoderPin2 = 7;
-
 volatile int lastEncoded = 0;
 volatile float encoderValue = 0;
-
 long lastencoderValue = 0;
-
 int lastMSB = 0;
 int lastLSB = 0;
 
 //Upper Encoder Initialize
 int encoder2Pin1 = 8;
 int encoder2Pin2 = 9;
-
 volatile int lastEncoded2 = 0;
 volatile int encoderValue2 = 0;
-
 long lastencoderValue2 = 0;
-
 int lastMSB2 = 0;
 int lastLSB2 = 0;
 
 void setup() {
+  // set all vals in buffer to 0
   for (int i = 0; i < BUFFSIZE; i++) {
     motrBuff[i] = 0;
     acclBuff[i] = 0;
@@ -157,29 +152,35 @@ void setup() {
   
   analogWriteResolution(12); // set the DAC to output 12bit audio
 
+  // set waveform for upper string
   waveform1.begin(WAVEFORM_SAWTOOTH);
   waveform1.frequency(refPitch);
   waveform1.amplitude(1.0);
 
+  // set amplitude for upper string
   ampEnv.amplitude(1.0);
   filtEnv.amplitude(0.0);
   filter1.frequency(100);
   filter1.octaveControl(5);
 
+  // set waveform for upper string
   waveform2.begin(WAVEFORM_SAWTOOTH);
   waveform2.frequency(293.333);
   waveform2.amplitude(1.0);
 
+  // set amplitude for lower stirng
   ampEnv2.amplitude(1.0);
   filtEnv2.amplitude(0.0);
   filter2.frequency(10000);
   filter2.octaveControl(5);
 
+  // set overall amplitude
   ampEnv0.amplitude(1.0);
   filtEnv0.amplitude(0.0);
   filter0.frequency(10000);
   filter0.octaveControl(5);
 
+  // set filters
   filtEnv3.amplitude(1.0);
   filter3.frequency(50);
   filter3.octaveControl(1);
@@ -188,6 +189,7 @@ void setup() {
   filter4.frequency(10000);
   filter4.octaveControl(1);
 
+  // set mixer default
   mixer.gain(0, 0.4);
   mixer.gain(1, 0.4);
 
@@ -235,8 +237,6 @@ void loop() {
   String activeParameter = parameters[parameterIndex];
   lcd.setCursor(0, 0);
   lcd.print(activeParameter);
-
-
 
   //  Choose a scale
   if (activeParameter == "SCALE           ") {
@@ -330,7 +330,7 @@ void loop() {
     lcd.print("Hz    ");
   }
 
-
+  // Calculate frequency for upper string
   float freq = freq;
   float in1 = analogRead(A0);
   in1 = in1 / 1023.; // normalize to 0.0 -> 1.0
@@ -348,9 +348,7 @@ void loop() {
   waveform1.frequency(freq);
   //  filter1.frequency(2*freq);
 
-
-
-  //Second string
+  //Calculate frequency for lower string
   float freq2 = freq;
   float in2 = analogRead(A1);
   in2 = in2 / 1023.; // normalize to 0.0 -> 1.0
@@ -358,9 +356,6 @@ void loop() {
   float baseFreq2 = refPitch * pow(2, ((base - 69.66) / 12.)) * (2. / 3.);
   freq2 = baseFreq2 + in2 * baseFreq2 * 4;
   waveform2.frequency(freq2);
-
-
-  //STILL CONTAINS BUGS WHEN CHANGING BETWEEN MODES
 
   //map analog A2 (motor) to amplitude
   int in3 = analogRead(A2);
